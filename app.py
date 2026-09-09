@@ -62,7 +62,7 @@ st.markdown("""
 # PATHS
 # -------------------------------------------------
 
-MODEL_PATH = "models/best_plant_model.keras"
+MODEL_PATH = "models/best_plant_model_improved.keras"
 HISTORY_FOLDER = "history"
 HISTORY_FILE = os.path.join(
     HISTORY_FOLDER,
