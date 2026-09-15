@@ -1,311 +1,232 @@
-import streamlit as st
-import tensorflow as tf
-import numpy as np
 import os
+import numpy as np
 import pandas as pd
+import streamlit as st
 from PIL import Image
-from datetime import datetime
-
-# -------------------------------------------------
-# PAGE CONFIGURATION
-# -------------------------------------------------
 
 st.set_page_config(
-    page_title="Plant Disease & Health Detection",
+    page_title="Plant Disease and Health Detection",
     page_icon="🌱",
     layout="wide"
 )
 
 # -------------------------------------------------
-# CUSTOM CSS
+# LANGUAGE
 # -------------------------------------------------
-
-st.markdown("""
-<style>
-
-.main-title {
-    font-size: 42px;
-    font-weight: 700;
-    text-align: center;
-    margin-bottom: 5px;
-}
-
-.subtitle {
-    text-align: center;
-    font-size: 18px;
-    margin-bottom: 30px;
-}
-
-.feature-card {
-    padding: 22px;
-    border-radius: 15px;
-    border: 1px solid rgba(128,128,128,0.25);
-    margin-bottom: 15px;
-    min-height: 150px;
-}
-
-.result-card {
-    padding: 25px;
-    border-radius: 15px;
-    border: 1px solid rgba(128,128,128,0.25);
-    margin-top: 20px;
-}
-
-.small-text {
-    font-size: 14px;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# -------------------------------------------------
-# PATHS
-# -------------------------------------------------
-
-MODEL_PATH = "models/best_plant_model_improved.keras"
-HISTORY_FOLDER = "history"
-HISTORY_FILE = os.path.join(
-    HISTORY_FOLDER,
-    "prediction_history.csv"
+language = st.sidebar.selectbox(
+    "🌐 Language / भाषा",
+    ["English", "मराठी"]
 )
 
-os.makedirs(HISTORY_FOLDER, exist_ok=True)
+is_marathi = language == "मराठी"
+
+def tr(english, marathi):
+    return marathi if is_marathi else english
+
 
 # -------------------------------------------------
-# MODEL
+# PATHS AND MODEL
 # -------------------------------------------------
+MODEL_PATH = "models/best_plant_model_improved.keras"
+HISTORY_DIR = "history"
+HISTORY_FILE = os.path.join(HISTORY_DIR, "prediction_history.csv")
+CONFIDENCE_THRESHOLD = 0.85
 
+os.makedirs(HISTORY_DIR, exist_ok=True)
+
+
+# -------------------------------------------------
+# LOAD MODEL
+# -------------------------------------------------
 @st.cache_resource
 def load_model():
-    return tf.keras.models.load_model(MODEL_PATH)
+    from tensorflow.keras.models import load_model
+    return load_model(MODEL_PATH)
 
 try:
     model = load_model()
+    model_available = True
 except Exception as e:
-    st.error("❌ Model could not be loaded.")
-    st.error(str(e))
-    st.stop()
+    model = None
+    model_available = False
+    model_error = str(e)
+
 
 # -------------------------------------------------
-# CLASS NAMES
+# CLASS INFORMATION
 # -------------------------------------------------
+class_names = ["Healthy", "Powdery", "Rust"]
 
-class_names = [
-    "Healthy",
-    "Powdery",
-    "Rust"
-]
-
-# -------------------------------------------------
-# CARE INFORMATION
-# -------------------------------------------------
-
-care_tips = {
-
-    "Healthy":
-        "🌿 The plant appears healthy. Continue proper watering, "
-        "adequate sunlight and regular plant care.",
-
-    "Powdery":
-        "🍃 Remove affected leaves and improve air circulation. "
-        "Avoid excessive moisture on the leaves.",
-
-    "Rust":
-        "🍂 Remove affected leaves and keep the plant area clean. "
-        "Improve air circulation and avoid wet foliage."
+marathi_names = {
+    "Healthy": "निरोगी",
+    "Powdery": "पावडरी रोग",
+    "Rust": "रस्ट रोग"
 }
 
-disease_info = {
-
+care_tips = {
     "Healthy": {
-        "description":
-            "The leaf does not show the disease patterns represented "
-            "by the trained classes.",
-        "signs":
-            "Normal green appearance and no obvious powdery or rust-like symptoms.",
-        "care":
-            "Maintain suitable sunlight, watering and general plant care."
+        "en": "The leaf appears healthy. Continue proper watering, sunlight and regular plant care.",
+        "mr": "पान निरोगी दिसत आहे. योग्य पाणी, सूर्यप्रकाश आणि नियमित निगा सुरू ठेवा."
     },
-
     "Powdery": {
-        "description":
-            "Powdery disease commonly appears as a white or powder-like "
-            "layer on plant surfaces.",
-        "signs":
-            "White powder-like patches may appear on leaves.",
-        "care":
-            "Remove affected leaves and maintain good air circulation."
+        "en": "Remove badly affected leaves, improve air circulation and avoid unnecessary moisture on leaves.",
+        "mr": "जास्त प्रभावित पाने काढा, हवेचे योग्य circulation ठेवा आणि पानांवर अनावश्यक ओलावा टाळा."
     },
-
     "Rust": {
-        "description":
-            "Rust is a fungal disease that can produce rust-coloured "
-            "spots or patches on leaves.",
-        "signs":
-            "Orange, brown or rust-like spots may appear on leaves.",
-        "care":
-            "Remove affected leaves and keep the plant area clean."
+        "en": "Remove affected leaves, maintain good air circulation and avoid excess moisture.",
+        "mr": "प्रभावित पाने काढा, हवेचे योग्य circulation ठेवा आणि जास्त ओलावा टाळा."
     }
 }
 
-# -------------------------------------------------
-# SIDEBAR
-# -------------------------------------------------
+disease_info = {
+    "Healthy": {
+        "description": "The leaf does not show the target disease symptoms recognized by the model.",
+        "signs": "Generally green and without strong visible disease patterns.",
+        "care": "Continue regular watering, sunlight and plant care."
+    },
+    "Powdery": {
+        "description": "Powdery mildew commonly appears as a white powder-like coating on leaf surfaces.",
+        "signs": "White or powder-like patches may appear on leaves.",
+        "care": "Remove affected leaves and improve air circulation."
+    },
+    "Rust": {
+        "description": "Rust is commonly associated with rust-colored spots or patches on leaves.",
+        "signs": "Orange, brown or rust-colored spots may be visible.",
+        "care": "Remove affected leaves and reduce excessive moisture."
+    }
+}
 
-st.sidebar.title("🌱 Plant Health")
 
-page = st.sidebar.radio(
-    "Navigation",
-    [
-        "🏠 Home",
-        "🔍 Detection",
-        "📊 Statistics",
-        "📜 History",
-        "📚 Disease Information",
-        "⚙️ Preferences",
-        "ℹ️ About"
-    ]
-)
+# -------------------------------------------------
+# SIDEBAR NAVIGATION
+# -------------------------------------------------
+pages = [
+    "🏠 Home",
+    "🔍 Detection",
+    "📊 Statistics",
+    "📜 History",
+    "📚 Disease Information",
+    "⚙️ Preferences",
+    "ℹ️ About"
+]
+
+marathi_labels = {
+    "🏠 Home": "🏠 होम",
+    "🔍 Detection": "🔍 रोग शोध",
+    "📊 Statistics": "📊 आकडेवारी",
+    "📜 History": "📜 इतिहास",
+    "📚 Disease Information": "📚 रोगाची माहिती",
+    "⚙️ Preferences": "⚙️ Preferences",
+    "ℹ️ About": "ℹ️ प्रकल्पाबद्दल"
+}
+
+if is_marathi:
+    display_pages = [marathi_labels[p] for p in pages]
+    selected_display = st.sidebar.radio("नेव्हिगेशन", display_pages)
+    page = pages[display_pages.index(selected_display)]
+else:
+    page = st.sidebar.radio("Navigation", pages)
 
 st.sidebar.markdown("---")
-st.sidebar.caption("Plant Disease & Health Detection")
-st.sidebar.caption("Deep Learning Project")
+st.sidebar.caption(
+    tr(
+        "Plant Disease and Health Detection",
+        "Plant Disease and Health Detection"
+    )
+)
+
 
 # -------------------------------------------------
-# HOME PAGE
+# HOME
 # -------------------------------------------------
-
 if page == "🏠 Home":
 
-    st.markdown(
-        '<div class="main-title">🌱 Plant Disease & Health Detection</div>',
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        '<div class="subtitle">'
-        'An AI-based system for detecting plant leaf health conditions'
-        '</div>',
-        unsafe_allow_html=True
-    )
-
-    st.image(
-        "https://images.unsplash.com/photo-1416879595882-3373a0480b5b",
-        caption="Healthy Plants",
-        width="stretch"
-    )
-
-    st.header("🌿 Welcome")
-
-    st.write(
-        "This project uses Deep Learning to analyze plant leaf images "
-        "and predict whether the leaf belongs to one of the trained "
-        "health conditions."
+    st.title(
+        tr(
+            "🌱 Plant Disease and Health Detection",
+            "🌱 वनस्पती रोग आणि आरोग्य शोध प्रणाली"
+        )
     )
 
     st.write(
-        "The current model is trained to recognize three classes: "
-        "**Healthy, Powdery and Rust**."
+        tr(
+            "Upload a plant leaf image to analyze its health condition.",
+            "वनस्पतीच्या पानाची प्रतिमा अपलोड करून तिच्या आरोग्याची स्थिती तपासा."
+        )
     )
 
     st.markdown("---")
-
-    st.header("✨ Project Features")
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.markdown(
-            """
-            <div class="feature-card">
-            <h3>🔍 Disease Detection</h3>
-            <p>Upload a leaf image and get a predicted plant condition
-            with confidence.</p>
-            </div>
-            """,
-            unsafe_allow_html=True
+        st.subheader(tr("🔍 Disease Detection", "🔍 रोग शोध"))
+        st.write(
+            tr(
+                "Predicts Healthy, Powdery or Rust.",
+                "Healthy, Powdery किंवा Rust यापैकी अंदाज देते."
+            )
         )
 
     with col2:
-        st.markdown(
-            """
-            <div class="feature-card">
-            <h3>🖼️ Image Quality</h3>
-            <p>The application checks image sharpness before making
-            a prediction.</p>
-            </div>
-            """,
-            unsafe_allow_html=True
+        st.subheader(tr("📊 Confidence", "📊 Confidence"))
+        st.write(
+            tr(
+                "Shows the model confidence for recognized predictions.",
+                "ओळखलेल्या prediction साठी model confidence दाखवते."
+            )
         )
 
     with col3:
-        st.markdown(
-            """
-            <div class="feature-card">
-            <h3>🌿 Care Tips</h3>
-            <p>Basic care information is displayed according to
-            the predicted condition.</p>
-            </div>
-            """,
-            unsafe_allow_html=True
+        st.subheader(tr("📜 History", "📜 इतिहास"))
+        st.write(
+            tr(
+                "Stores recognized predictions for later viewing.",
+                "ओळखलेले predictions नंतर पाहण्यासाठी save केले जातात."
+            )
         )
-
-    col4, col5, col6 = st.columns(3)
-
-    with col4:
-        st.markdown(
-            """
-            <div class="feature-card">
-            <h3>📜 Prediction History</h3>
-            <p>Previous predictions can be stored and reviewed.</p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    with col5:
-        st.markdown(
-            """
-            <div class="feature-card">
-            <h3>📊 Statistics</h3>
-            <p>View prediction counts and confidence statistics.</p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    with col6:
-        st.markdown(
-            """
-            <div class="feature-card">
-            <h3>📚 Disease Information</h3>
-            <p>Learn basic information about the supported conditions.</p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    st.markdown("---")
 
     st.info(
-        "💡 For best results, upload a clear and close-up image "
-        "of a plant leaf."
+        tr(
+            "For best results, upload a clear and close-up leaf image.",
+            "चांगल्या परिणामांसाठी पानाचा स्पष्ट आणि जवळून घेतलेला फोटो अपलोड करा."
+        )
     )
 
-# -------------------------------------------------
-# DETECTION PAGE
-# -------------------------------------------------
 
+# -------------------------------------------------
+# DETECTION
+# -------------------------------------------------
 elif page == "🔍 Detection":
 
-    st.title("🔍 Plant Disease Detection")
-
-    st.write(
-        "Upload a clear plant leaf image to analyze its condition."
+    st.title(
+        tr(
+            "🔍 Plant Disease Detection",
+            "🔍 वनस्पती रोग शोध"
+        )
     )
 
+    st.write(
+        tr(
+            "Upload a clear plant leaf image and click Predict.",
+            "पानाचा स्पष्ट फोटो अपलोड करा आणि Predict वर क्लिक करा."
+        )
+    )
+
+    if not model_available:
+        st.error(
+            tr(
+                "Model could not be loaded.",
+                "Model load होऊ शकले नाही."
+            )
+        )
+        st.code(model_error)
+
     uploaded_file = st.file_uploader(
-        "📷 Choose a plant leaf image",
+        tr(
+            "📤 Upload a leaf image",
+            "📤 पानाची प्रतिमा अपलोड करा"
+        ),
         type=["jpg", "jpeg", "png"]
     )
 
@@ -313,354 +234,217 @@ elif page == "🔍 Detection":
 
         image = Image.open(uploaded_file).convert("RGB")
 
-        st.subheader("🖼️ Uploaded Image")
-
         st.image(
             image,
-            caption="Uploaded Plant Image",
+            caption=tr("Uploaded Image", "अपलोड केलेली प्रतिमा"),
             width="stretch"
         )
-
-        image_array = np.array(image)
-
-        # ---------------------------------------------
-        # IMAGE QUALITY
-        # ---------------------------------------------
-
-        gray_image = np.mean(image_array, axis=2)
-
-        gradient_x = np.gradient(
-            gray_image,
-            axis=0
-        )
-
-        gradient_y = np.gradient(
-            gray_image,
-            axis=1
-        )
-
-        sharpness_score = (
-            np.var(gradient_x) +
-            np.var(gradient_y)
-        )
-
-        st.subheader("🖼️ Image Quality")
-
-        st.write(
-            f"Image Sharpness Score: "
-            f"**{sharpness_score:.2f}**"
-        )
-
-        if sharpness_score < 100:
-            st.warning(
-                "⚠️ Image quality is low. "
-                "A clearer image is recommended."
-            )
-        else:
-            st.success(
-                "✅ Image quality is good."
-            )
-
-        st.markdown("---")
-
-        # ---------------------------------------------
-        # DETECTION BUTTON
-        # ---------------------------------------------
 
         if st.button(
-            "🔍 Detect Disease",
+            tr("🔎 Predict Disease", "🔎 रोग शोधा"),
             type="primary",
-            width="stretch"
+            disabled=not model_available
         ):
 
-            with st.spinner("Analyzing image..."):
+            img = image.resize((224, 224))
+            img_array = np.array(img, dtype=np.float32)
+            img_array = np.expand_dims(img_array, axis=0)
 
-                resized_image = image.resize(
-                    (224, 224)
-                )
+            predictions = model.predict(img_array, verbose=0)[0]
 
-                img_array = np.array(
-                    resized_image
-                )
+            predicted_index = int(np.argmax(predictions))
+            predicted_class = class_names[predicted_index]
+            confidence = float(predictions[predicted_index])
 
-                img_array = np.expand_dims(
-                    img_array,
-                    axis=0
-                )
+            st.markdown("---")
+            st.subheader(
+                tr("📋 Detection Result", "📋 शोध परिणाम")
+            )
 
-                prediction = model.predict(
-                    img_array,
-                    verbose=0
-                )
-
-                predicted_class = np.argmax(
-                    prediction[0]
-                )
-
-                confidence = float(
-                    prediction[0][predicted_class]
-                )
-
-                disease_name = class_names[
-                    predicted_class
-                ]
-
-            st.subheader("📊 Detection Result")
-
-            # -----------------------------------------
-            # LOW CONFIDENCE
-            # -----------------------------------------
-
-            if confidence < 0.70:
+            if confidence < CONFIDENCE_THRESHOLD:
 
                 st.warning(
-                    "⚠️ The model is not confident enough "
-                    "to give a reliable prediction."
+                    tr(
+                        "⚠️ The model is not confident enough to recognize this image.",
+                        "⚠️ या प्रतिमेला ओळखण्यासाठी model चा confidence पुरेसा नाही."
+                    )
                 )
 
                 st.write(
-                    f"Model confidence: "
-                    f"**{confidence * 100:.2f}%**"
+                    tr(
+                        "Please upload a clear, close-up image of a plant leaf.",
+                        "कृपया वनस्पतीच्या पानाचा स्पष्ट आणि जवळून घेतलेला फोटो अपलोड करा."
+                    )
                 )
 
-                st.info(
-                    "Please upload a clear, close-up "
-                    "image of a plant leaf."
+                st.metric(
+                    tr("Model Confidence", "Model Confidence"),
+                    f"{confidence * 100:.2f}%"
                 )
-
-            # -----------------------------------------
-            # HIGH CONFIDENCE
-            # -----------------------------------------
 
             else:
 
-                if disease_name == "Healthy":
-
-                    st.success(
-                        f"🌿 Prediction: {disease_name}"
-                    )
-
-                else:
-
-                    st.warning(
-                        f"🍃 Prediction: {disease_name}"
-                    )
-
-                st.write(
-                    f"Confidence: "
-                    f"**{confidence * 100:.2f}%**"
-                )
-
-                st.progress(
-                    min(confidence, 1.0)
-                )
-
-                # -------------------------------------
-                # HEALTH STATUS
-                # -------------------------------------
-
-                st.subheader(
-                    "🩺 Plant Health Status"
-                )
-
-                if disease_name == "Healthy":
-
-                    st.success(
-                        "🌿 The plant appears healthy."
-                    )
-
-                elif disease_name == "Powdery":
-
-                    st.warning(
-                        "🍃 The plant may be affected "
-                        "by Powdery disease."
-                    )
-
-                elif disease_name == "Rust":
-
-                    st.warning(
-                        "🍂 The plant may be affected "
-                        "by Rust disease."
-                    )
-
-                # -------------------------------------
-                # CARE TIPS
-                # -------------------------------------
-
-                st.subheader(
-                    "🌿 Care Tips"
-                )
-
-                st.info(
-                    care_tips[disease_name]
-                )
-
-                # -------------------------------------
-                # SAVE HISTORY
-                # -------------------------------------
-
-                new_record = pd.DataFrame({
-                    "Date": [
-                        datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        )
-                    ],
-                    "Prediction": [
-                        disease_name
-                    ],
-                    "Confidence": [
-                        round(
-                            confidence * 100,
-                            2
-                        )
-                    ],
-                    "Image Quality": [
-                        round(
-                            sharpness_score,
-                            2
-                        )
-                    ]
-                })
-
-                if os.path.exists(
-                    HISTORY_FILE
-                ):
-
-                    old_history = pd.read_csv(
-                        HISTORY_FILE
-                    )
-
-                    updated_history = pd.concat(
-                        [
-                            old_history,
-                            new_record
-                        ],
-                        ignore_index=True
-                    )
-
-                else:
-
-                    updated_history = new_record
-
-                updated_history.to_csv(
-                    HISTORY_FILE,
-                    index=False
+                shown_name = (
+                    marathi_names[predicted_class]
+                    if is_marathi
+                    else predicted_class
                 )
 
                 st.success(
-                    "✅ Prediction saved to history."
+                    tr(
+                        f"✅ Predicted Condition: {predicted_class}",
+                        f"✅ अंदाजित स्थिती: {shown_name}"
+                    )
                 )
 
-# -------------------------------------------------
-# STATISTICS PAGE
-# -------------------------------------------------
+                st.metric(
+                    tr("Confidence", "Confidence"),
+                    f"{confidence * 100:.2f}%"
+                )
 
+                st.progress(confidence)
+
+                if predicted_class == "Healthy":
+                    status_text = tr(
+                        "🌿 Status: Healthy",
+                        "🌿 स्थिती: निरोगी"
+                    )
+                else:
+                    status_text = tr(
+                        "⚠️ Status: Disease Detected",
+                        "⚠️ स्थिती: रोग आढळला"
+                    )
+
+                st.info(status_text)
+
+                st.subheader(
+                    tr("💡 Care Tips", "💡 निगा टिप्स")
+                )
+
+                tip = (
+                    care_tips[predicted_class]["mr"]
+                    if is_marathi
+                    else care_tips[predicted_class]["en"]
+                )
+
+                st.write(tip)
+
+                history_row = pd.DataFrame(
+                    [{
+                        "Prediction": predicted_class,
+                        "Confidence": round(confidence * 100, 2)
+                    }]
+                )
+
+                if os.path.exists(HISTORY_FILE):
+                    history_data = pd.read_csv(HISTORY_FILE)
+                    history_data = pd.concat(
+                        [history_data, history_row],
+                        ignore_index=True
+                    )
+                else:
+                    history_data = history_row
+
+                history_data.to_csv(HISTORY_FILE, index=False)
+
+                st.success(
+                    tr(
+                        "Prediction saved to history.",
+                        "Prediction history मध्ये save झाले."
+                    )
+                )
+
+
+# -------------------------------------------------
+# STATISTICS
+# -------------------------------------------------
 elif page == "📊 Statistics":
 
-    st.title("📊 Prediction Statistics")
+    st.title(
+        tr("📊 Prediction Statistics", "📊 Prediction आकडेवारी")
+    )
 
     if os.path.exists(HISTORY_FILE):
 
-        history_data = pd.read_csv(
-            HISTORY_FILE
-        )
+        history_data = pd.read_csv(HISTORY_FILE)
 
         if len(history_data) > 0:
 
-            total_predictions = len(
-                history_data
+            healthy_count = int(
+                (history_data["Prediction"] == "Healthy").sum()
+            )
+            powdery_count = int(
+                (history_data["Prediction"] == "Powdery").sum()
+            )
+            rust_count = int(
+                (history_data["Prediction"] == "Rust").sum()
             )
 
-            healthy_count = len(
-                history_data[
-                    history_data["Prediction"] == "Healthy"
-                ]
-            )
-
-            powdery_count = len(
-                history_data[
-                    history_data["Prediction"] == "Powdery"
-                ]
-            )
-
-            rust_count = len(
-                history_data[
-                    history_data["Prediction"] == "Rust"
-                ]
-            )
-
-            average_confidence = (
-                history_data["Confidence"].mean()
-            )
-
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3 = st.columns(3)
 
             with col1:
                 st.metric(
-                    "Total Predictions",
-                    total_predictions
+                    tr("Healthy", "निरोगी"),
+                    healthy_count
                 )
 
             with col2:
                 st.metric(
-                    "Healthy",
-                    healthy_count
+                    tr("Powdery", "पावडरी"),
+                    powdery_count
                 )
 
             with col3:
                 st.metric(
-                    "Powdery",
-                    powdery_count
-                )
-
-            with col4:
-                st.metric(
-                    "Rust",
+                    tr("Rust", "रस्ट"),
                     rust_count
                 )
+
+            average_confidence = history_data["Confidence"].mean()
 
             st.markdown("---")
 
             st.metric(
-                "Average Confidence",
+                tr("Average Confidence", "सरासरी Confidence"),
                 f"{average_confidence:.2f}%"
             )
 
             st.subheader(
-                "📈 Prediction Distribution"
+                tr("📈 Prediction Distribution", "📈 Prediction वितरण")
             )
 
-            counts = history_data[
-                "Prediction"
-            ].value_counts()
-
+            counts = history_data["Prediction"].value_counts()
             st.bar_chart(counts)
 
         else:
-
             st.info(
-                "No prediction statistics available yet."
+                tr(
+                    "No prediction statistics available yet.",
+                    "अजून prediction statistics उपलब्ध नाहीत."
+                )
             )
 
     else:
-
         st.info(
-            "No prediction history available yet."
+            tr(
+                "No prediction history available yet.",
+                "अजून prediction history उपलब्ध नाही."
+            )
         )
 
-# -------------------------------------------------
-# HISTORY PAGE
-# -------------------------------------------------
 
+# -------------------------------------------------
+# HISTORY
+# -------------------------------------------------
 elif page == "📜 History":
 
-    st.title("📜 Prediction History")
+    st.title(
+        tr("📜 Prediction History", "📜 Prediction History")
+    )
 
     if os.path.exists(HISTORY_FILE):
 
-        history_data = pd.read_csv(
-            HISTORY_FILE
-        )
+        history_data = pd.read_csv(HISTORY_FILE)
 
         if len(history_data) > 0:
 
@@ -676,12 +460,10 @@ elif page == "📜 History":
 
             with col1:
 
-                csv_data = history_data.to_csv(
-                    index=False
-                )
+                csv_data = history_data.to_csv(index=False)
 
                 st.download_button(
-                    "⬇️ Download History",
+                    tr("⬇️ Download History", "⬇️ History Download करा"),
                     data=csv_data,
                     file_name="prediction_history.csv",
                     mime="text/csv",
@@ -691,215 +473,290 @@ elif page == "📜 History":
             with col2:
 
                 if st.button(
-                    "🗑️ Clear History",
+                    tr("🗑️ Clear History", "🗑️ History Clear करा"),
                     width="stretch"
                 ):
 
                     os.remove(HISTORY_FILE)
 
                     st.success(
-                        "✅ Prediction history cleared."
+                        tr(
+                            "✅ Prediction history cleared.",
+                            "✅ Prediction history clear झाली."
+                        )
                     )
 
                     st.rerun()
 
         else:
-
             st.info(
-                "No previous predictions."
+                tr(
+                    "No previous predictions.",
+                    "पूर्वीचे predictions नाहीत."
+                )
             )
 
     else:
-
         st.info(
-            "No previous predictions yet."
+            tr(
+                "No previous predictions yet.",
+                "अजून पूर्वीचे predictions नाहीत."
+            )
         )
+
 
 # -------------------------------------------------
 # DISEASE INFORMATION
 # -------------------------------------------------
-
 elif page == "📚 Disease Information":
 
-    st.title("📚 Disease Information")
+    st.title(
+        tr(
+            "📚 Disease Information",
+            "📚 रोगाची माहिती"
+        )
+    )
 
     st.write(
-        "Basic information about the conditions supported "
-        "by the current model."
+        tr(
+            "Basic information about the conditions supported by the current model.",
+            "सध्याच्या model मध्ये असलेल्या conditions ची मूलभूत माहिती."
+        )
     )
 
     selected_disease = st.selectbox(
-        "Select a condition",
+        tr("Select a condition", "Condition निवडा"),
         class_names
     )
 
-    info = disease_info[
-        selected_disease
-    ]
+    info = disease_info[selected_disease]
 
-    st.subheader(
-        f"🌿 {selected_disease}"
+    display_name = (
+        marathi_names[selected_disease]
+        if is_marathi
+        else selected_disease
     )
 
-    st.write(
-        f"**Description:** {info['description']}"
-    )
+    st.subheader(f"🌿 {display_name}")
 
-    st.write(
-        f"**Common signs:** {info['signs']}"
-    )
-
-    st.write(
-        f"**Basic care:** {info['care']}"
-    )
+    if is_marathi:
+        st.write(f"**वर्णन:** {info['description']}")
+        st.write(f"**सामान्य लक्षणे:** {info['signs']}")
+        st.write(f"**मूलभूत निगा:** {info['care']}")
+    else:
+        st.write(f"**Description:** {info['description']}")
+        st.write(f"**Common signs:** {info['signs']}")
+        st.write(f"**Basic care:** {info['care']}")
 
     st.info(
-        "⚠️ This information is for educational purposes. "
-        "The model prediction should not be treated as a professional "
-        "plant diagnosis."
+        tr(
+            "⚠️ This information is for educational purposes. The model prediction should not be treated as a professional plant diagnosis.",
+            "⚠️ ही माहिती शैक्षणिक उद्देशासाठी आहे. Model prediction ला व्यावसायिक plant diagnosis समजू नये."
+        )
     )
+
 
 # -------------------------------------------------
 # PREFERENCES
 # -------------------------------------------------
-
 elif page == "⚙️ Preferences":
 
-    st.title("⚙️ Preferences")
-
-    st.subheader(
-        "🎯 Prediction Settings"
+    st.title(
+        tr("⚙️ Preferences", "⚙️ Preferences")
     )
 
-    confidence_display = st.checkbox(
-        "Show confidence percentage",
+    st.subheader(
+        tr("🎯 Prediction Settings", "🎯 Prediction Settings")
+    )
+
+    st.checkbox(
+        tr("Show confidence percentage", "Confidence percentage दाखवा"),
         value=True
     )
 
-    quality_display = st.checkbox(
-        "Show image quality score",
+    st.checkbox(
+        tr("Show image quality score", "Image quality score दाखवा"),
         value=True
     )
 
     st.markdown("---")
 
     st.subheader(
-        "ℹ️ Current Model"
+        tr("ℹ️ Current Model", "ℹ️ सध्याचा Model")
     )
 
     st.write(
-        "Model: **MobileNetV2-based Deep Learning Model**"
+        tr(
+            "Model: **MobileNetV2-based Deep Learning Model**",
+            "Model: **MobileNetV2 आधारित Deep Learning Model**"
+        )
     )
 
     st.write(
-        "Classes: **Healthy, Powdery, Rust**"
+        tr(
+            "Classes: **Healthy, Powdery, Rust**",
+            "Classes: **Healthy, Powdery, Rust**"
+        )
     )
 
     st.write(
-        "Input image size: **224 × 224 pixels**"
+        tr(
+            "Input image size: **224 × 224 pixels**",
+            "Input image size: **224 × 224 pixels**"
+        )
     )
 
-    st.markdown("---")
+    st.write(
+        tr(
+            f"Recognition threshold: **{CONFIDENCE_THRESHOLD * 100:.0f}%**",
+            f"Recognition threshold: **{CONFIDENCE_THRESHOLD * 100:.0f}%**"
+        )
+    )
 
     if st.button(
-        "🔄 Reset Preferences"
+        tr("🔄 Reset Preferences", "🔄 Preferences Reset करा")
     ):
-
         st.success(
-            "✅ Preferences restored to default."
+            tr(
+                "✅ Preferences restored to default.",
+                "✅ Preferences default वर reset झाल्या."
+            )
         )
 
-# -------------------------------------------------
-# ABOUT PAGE
-# -------------------------------------------------
 
+# -------------------------------------------------
+# ABOUT
+# -------------------------------------------------
 elif page == "ℹ️ About":
 
-    st.title("ℹ️ About the Project")
-
-    st.header(
-        "🌱 Plant Disease & Health Detection"
+    st.title(
+        tr("ℹ️ About the Project", "ℹ️ प्रकल्पाबद्दल")
     )
 
+    st.header("🌱 Plant Disease & Health Detection")
+
     st.write(
-        "Plant Disease & Health Detection is a Deep Learning-based "
-        "project designed to analyze plant leaf images and predict "
-        "their health condition."
+        tr(
+            "Plant Disease & Health Detection is a Deep Learning-based project designed to analyze plant leaf images and predict their health condition.",
+            "Plant Disease & Health Detection हा Deep Learning आधारित प्रकल्प आहे जो वनस्पतीच्या पानांच्या प्रतिमांचे विश्लेषण करून त्यांच्या आरोग्य स्थितीचा अंदाज लावतो."
+        )
     )
 
     st.markdown("---")
 
-    st.subheader("🎯 Objective")
-
-    st.write(
-        "The main objective is to develop an easy-to-use system "
-        "that can analyze plant leaf images and provide a predicted "
-        "health condition along with confidence and basic care tips."
+    st.subheader(
+        tr("🎯 Objective", "🎯 उद्दिष्ट")
     )
 
-    st.subheader("🧠 Technology Used")
-
     st.write(
-        """
-        • Python  
-        • TensorFlow  
-        • Keras  
-        • MobileNetV2  
-        • NumPy  
-        • Pandas  
-        • Streamlit  
-        • Pillow
-        """
+        tr(
+            "The main objective is to develop an easy-to-use system that can analyze plant leaf images and provide a predicted health condition along with confidence and basic care tips.",
+            "वनस्पतीच्या पानांच्या प्रतिमांचे विश्लेषण करून confidence आणि मूलभूत care tips सह आरोग्य स्थितीचा अंदाज देणारी वापरण्यास सोपी प्रणाली तयार करणे हे मुख्य उद्दिष्ट आहे."
+        )
     )
 
-    st.subheader("📂 Dataset")
-
-    st.write(
-        "The disease model was trained using plant leaf images "
-        "belonging to three classes: Healthy, Powdery and Rust."
+    st.subheader(
+        tr("🧠 Technology Used", "🧠 वापरलेले तंत्रज्ञान")
     )
 
-    st.subheader("✨ Main Features")
+    tech_list = [
+        "Python",
+        "TensorFlow",
+        "Keras",
+        "MobileNetV2",
+        "NumPy",
+        "Pandas",
+        "Streamlit",
+        "Pillow"
+    ]
 
-    st.write(
-        """
-        • Plant leaf image upload  
-        • Disease prediction  
-        • Confidence score  
-        • Image quality checking  
-        • Care tips  
-        • Prediction history  
-        • Clear history  
-        • Statistics  
-        • Disease information  
-        • Preferences  
-        • About section
-        """
+    for item in tech_list:
+        st.write(f"• {item}")
+
+    st.subheader(
+        tr("📂 Dataset", "📂 Dataset")
     )
 
-    st.subheader("⚠️ Limitation")
-
     st.write(
-        "The model cannot guarantee 100% correct predictions for "
-        "every possible image. Performance can change when images "
-        "differ significantly from the training data."
+        tr(
+            "The disease model was trained using plant leaf images belonging to three classes: Healthy, Powdery and Rust.",
+            "Model ला तीन classes साठी plant leaf images वर train केले आहे: Healthy, Powdery आणि Rust."
+        )
     )
 
-    st.subheader("🚀 Future Scope")
+    st.subheader(
+        tr("✨ Main Features", "✨ मुख्य वैशिष्ट्ये")
+    )
+
+    feature_list = [
+        "Plant leaf image upload",
+        "Disease prediction",
+        "Confidence score",
+        "Image quality checking",
+        "Unknown / Not Recognized handling",
+        "Care tips",
+        "Prediction history",
+        "Clear history",
+        "Statistics",
+        "Disease information",
+        "English / Marathi language support",
+        "Preferences",
+        "About section"
+    ]
+
+    if is_marathi:
+        feature_list_mr = [
+            "Plant leaf image upload",
+            "Disease prediction",
+            "Confidence score",
+            "Image quality checking",
+            "Unknown / Not Recognized handling",
+            "Care tips",
+            "Prediction history",
+            "Clear history",
+            "Statistics",
+            "Disease information",
+            "English / Marathi language support",
+            "Preferences",
+            "About section"
+        ]
+
+        for item in feature_list_mr:
+            st.write(f"• {item}")
+    else:
+        for item in feature_list:
+            st.write(f"• {item}")
+
+    st.subheader(
+        tr("⚠️ Limitation", "⚠️ मर्यादा")
+    )
 
     st.write(
-        "Future improvements can include a dedicated plant/non-plant "
-        "classifier, more diverse plant species and disease images, "
-        "and evaluation using external images."
+        tr(
+            "The model cannot guarantee 100% correct predictions for every possible image. Performance can change when images differ significantly from the training data.",
+            "Model प्रत्येक प्रतिमेसाठी 100% अचूक prediction ची हमी देऊ शकत नाही. Training data पेक्षा खूप वेगळ्या प्रतिमांवर performance बदलू शकते."
+        )
     )
+
+    st.subheader(
+        tr("🚀 Future Scope", "🚀 भविष्यातील विस्तार")
+    )
+
+    st.write(
+        tr(
+            "The system can be extended with more plant species, more disease classes, larger and more diverse datasets, and improved real-world validation.",
+            "या system मध्ये भविष्यात अधिक plant species, अधिक disease classes, मोठे आणि विविध datasets तसेच real-world validation जोडता येऊ शकते."
+        )
+    )
+
 
 # -------------------------------------------------
 # FOOTER
 # -------------------------------------------------
-
 st.markdown("---")
-
 st.caption(
-    "🌱 Plant Disease & Health Detection | "
-    "Deep Learning Project"
+    tr(
+        "🌱 Plant Disease and Health Detection | Deep Learning + Streamlit",
+        "🌱 Plant Disease and Health Detection | Deep Learning + Streamlit"
+    )
 )
